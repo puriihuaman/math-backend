@@ -1,0 +1,67 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Variables de entorno y secretos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Cachés y archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Herramientas de empaquetado y distribución
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg
+*.egg-info/
+MANIFEST
+pip-wheel-metadata/
+share/python-wheels/
+
+# Cachés y cobertura de pruebas
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+
+# Logs y archivos temporales
+*.log
+logs/
+*.tmp
+*.temp
+.cache/
+
+# Archivos de sistema operativo
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDEs y editores
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+
+# Servidores y archivos locales
+.uvicorn/
+*.pid
+
