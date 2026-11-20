@@ -1,14 +1,12 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 NonEmptyText = Annotated[str, Field(min_length=1)]
 
 
 class SubtemaSchema(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     id: NonEmptyText
     orden: Annotated[int, Field(ge=1)]
     titulo: NonEmptyText
@@ -21,8 +19,6 @@ class SubtemaSchema(BaseModel):
 
 
 class WeekPlanResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     modulo: Annotated[int, Field(ge=1, le=4)]
     semana: Annotated[int, Field(ge=1, le=4)]
     titulo_semana: NonEmptyText
@@ -38,8 +34,6 @@ class WeekPlanResponse(BaseModel):
 
 
 class EjercicioSchema(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     id: Annotated[int, Field(ge=1)]
     nivel: Literal["basico", "intermedio", "reto"]
     tipo: Literal["opcion_multiple", "respuesta_corta"]
@@ -60,14 +54,10 @@ class EjercicioSchema(BaseModel):
 
 
 class ExercisesResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     ejercicios: Annotated[list[EjercicioSchema], Field(min_length=1)]
 
 
 class GenerateExercisesRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     titulo_subtema: NonEmptyText
     explicacion_simplificada: NonEmptyText
     conceptos_fundamentales: Annotated[list[NonEmptyText], Field(min_length=1)]
@@ -75,24 +65,25 @@ class GenerateExercisesRequest(BaseModel):
     cantidad: Annotated[int, Field(ge=1, le=20)] = 6
 
 
-class GenerateWeeklyExamRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class SubtemaExamenInput(BaseModel):
+    titulo: NonEmptyText
+    explicacion_simplificada: NonEmptyText
+    conceptos_fundamentales: Annotated[list[NonEmptyText], Field(min_length=1)]
+    formulas_y_definiciones_originales: list[NonEmptyText] = Field(default_factory=list)
 
+
+class GenerateWeeklyExamRequest(BaseModel):
     titulo_semana: NonEmptyText
-    subtemas: Annotated[list[SubtemaSchema], Field(min_length=1)]
+    subtemas: Annotated[list[SubtemaExamenInput], Field(min_length=1)]
 
 
 class EvaluationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     enunciado: NonEmptyText
     respuesta_correcta_esperada: NonEmptyText
     respuesta_usuario: NonEmptyText
 
 
 class EvaluationResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     es_correcta: bool
     puntaje: Annotated[int, Field(ge=0, le=100)]
     retroalimentacion: NonEmptyText

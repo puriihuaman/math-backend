@@ -1,9 +1,10 @@
 import json
+from copy import deepcopy
 from typing import TypeVar
 
 from google import genai
-from google.genai import types
-from pydantic import BaseModel
+from google.genai import errors, types
+from pydantic import BaseModel, ValidationError
 
 from app.config import get_settings
 from app.models.schemas import (
@@ -20,7 +21,80 @@ class GeminiRateLimitError(RuntimeError):
     """Indica que se agotó temporalmente la cuota de Gemini."""
 
 
+class GeminiAPIError(RuntimeError):
+    """Error legible de la API de Gemini conservando su código HTTP."""
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+class GeminiResponseValidationError(RuntimeError):
+    """Indica que Gemini no devolvió datos compatibles con el esquema."""
+
+
 T = TypeVar("T", bound=BaseModel)
+
+
+UNSUPPORTED_SCHEMA_KEYS = {
+    "additionalProperties",
+    "additional_properties",
+    "$schema",
+    "default",
+    "title",
+}
+
+
+def build_gemini_schema(pydantic_model: type[BaseModel]) -> dict:
+    """Convierte el JSON Schema Pydantic a un esquema compatible con Gemini."""
+    raw_schema = pydantic_model.model_json_schema()
+    defs = raw_schema.pop("$defs", {})
+
+    def resolve(node: object) -> object:
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+
+        if "$ref" in node:
+            ref = node["$ref"]
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                name = ref.removeprefix("#/$defs/")
+                if name in defs:
+                    resolved = resolve(deepcopy(defs[name]))
+                    siblings = {key: resolve(value) for key, value in node.items() if key != "$ref"}
+                    if isinstance(resolved, dict):
+                        resolved.update(siblings)
+                    return resolved
+
+        resolved_node = {}
+        for key, value in node.items():
+            if key in UNSUPPORTED_SCHEMA_KEYS:
+                continue
+            if key == "anyOf":
+                branches = value if isinstance(value, list) else []
+                resolved_branches = [resolve(branch) for branch in branches]
+                non_null = [
+                    branch
+                    for branch in resolved_branches
+                    if not (isinstance(branch, dict) and branch.get("type") == "null")
+                ]
+                if len(resolved_branches) == 2 and len(non_null) == 1:
+                    branch = deepcopy(non_null[0])
+                    if isinstance(branch, dict):
+                        branch["nullable"] = True
+                        resolved_node.update(branch)
+                        continue
+                continue
+            resolved_node[key] = resolve(value)
+        return resolved_node
+
+    resolved = resolve(raw_schema)
+    if not isinstance(resolved, dict):
+        raise RuntimeError("El esquema Pydantic no pudo convertirse a un objeto JSON.")
+    resolved.pop("$defs", None)
+    return resolved
 
 
 def _is_rate_limit_error(error: Exception) -> bool:
@@ -48,9 +122,17 @@ class GeminiService:
                 config=types.GenerateContentConfig(
                     temperature=0.25,
                     response_mime_type="application/json",
-                    response_schema=response_schema,
+                    response_schema=build_gemini_schema(response_schema),
                 ),
             )
+        except (errors.APIError, errors.ClientError) as exc:
+            status_code = int(getattr(exc, "code", 500) or 500)
+            detail = getattr(exc, "message", None) or str(exc)
+            if status_code == 429 or _is_rate_limit_error(exc):
+                raise GeminiRateLimitError(
+                    "La cuota temporal de Gemini se agotó. Espera un momento y vuelve a intentarlo."
+                ) from exc
+            raise GeminiAPIError(status_code, detail) from exc
         except Exception as exc:
             if _is_rate_limit_error(exc):
                 raise GeminiRateLimitError(
@@ -58,16 +140,15 @@ class GeminiService:
                 ) from exc
             raise
 
-        parsed = getattr(response, "parsed", None)
-        if isinstance(parsed, response_schema):
-            return parsed
         text = getattr(response, "text", None)
         if not text:
             raise RuntimeError("Gemini devolvió una respuesta vacía.")
         try:
-            return response_schema.model_validate(json.loads(text))
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise RuntimeError("Gemini devolvió una respuesta con formato inválido.") from exc
+            return response_schema.model_validate_json(text)
+        except ValidationError as exc:
+            raise GeminiResponseValidationError(
+                f"Gemini devolvió una respuesta incompatible con el esquema: {exc}"
+            ) from exc
 
     async def generate_week_plan(self, modulo: int, semana: int, material: str) -> WeekPlanResponse:
         prompt = f"""

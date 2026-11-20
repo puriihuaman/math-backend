@@ -8,7 +8,10 @@ class Settings(BaseSettings):
     """Configuración cargada desde variables de entorno o `.env`."""
 
     gemini_api_key: SecretStr = Field(..., validation_alias="GEMINI_API_KEY")
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = Field(
+        default="gemini-3.8-flash",
+        validation_alias="GEMINI_MODEL",
+    )
     cors_origins: str = Field(
         default="http://localhost:5173",
         validation_alias="CORS_ORIGINS",

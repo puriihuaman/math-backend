@@ -7,7 +7,11 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.routers.study import router as study_router
-from app.services.gemini_service import GeminiRateLimitError
+from app.services.gemini_service import (
+    GeminiAPIError,
+    GeminiRateLimitError,
+    GeminiResponseValidationError,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -32,6 +36,35 @@ async def gemini_rate_limit_handler(
             "error": "rate_limit",
             "message": str(exc),
             "retryable": True,
+        },
+    )
+
+
+@app.exception_handler(GeminiAPIError)
+async def gemini_api_error_handler(
+    request: Request, exc: GeminiAPIError
+) -> JSONResponse:
+    status_code = exc.status_code if 400 <= exc.status_code <= 599 else 502
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": "gemini_api_error",
+            "message": "Gemini rechazó la solicitud.",
+            "detail": exc.detail,
+        },
+    )
+
+
+@app.exception_handler(GeminiResponseValidationError)
+async def gemini_validation_error_handler(
+    request: Request, exc: GeminiResponseValidationError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=502,
+        content={
+            "error": "invalid_gemini_response",
+            "message": "Gemini devolvió una respuesta incompatible.",
+            "detail": str(exc),
         },
     )
 
