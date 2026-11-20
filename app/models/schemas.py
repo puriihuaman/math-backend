@@ -1,4 +1,4 @@
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -73,7 +73,9 @@ class SubtemaExamenInput(BaseModel):
 
 
 class GenerateWeeklyExamRequest(BaseModel):
-    titulo_semana: NonEmptyText
+    titulo_semana: Optional[str] = "Semana de Estudio"
+    modulo: Optional[int] = None
+    semana: Optional[int] = None
     subtemas: Annotated[list[SubtemaExamenInput], Field(min_length=1)]
 
 

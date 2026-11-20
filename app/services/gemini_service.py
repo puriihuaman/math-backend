@@ -158,6 +158,10 @@ material trazable que aparece abajo. Divide en 3 a 5 subtemas secuenciales, de m
 complejidad. Explica con lenguaje cotidiano, añade analogías concretas y conserva las fórmulas
 originales con LaTeX válido entre $...$ o $$...$$. No inventes referencias: cada referencia
 debe copiar exactamente el nombre y Página/Diapositiva de una etiqueta del material.
+Regla estricta de analogía: para el campo analogia_vida_real genera una sola analogía de
+la vida real por subtema, sin mezclar metáforas ni conceptos. Usa únicamente un ejemplo
+cotidiano numérico o visual, concreto y fácil de imaginar, como repartir porciones iguales,
+turnos de reloj o cajas dentro de cajas. Evita explicaciones poéticas y abstractas.
 Al serializar JSON, escapa correctamente las barras invertidas de comandos LaTeX
 (por ejemplo \\land, \\lor, \\neg, \\forall, \\exists, \\rightarrow, \\subseteq).
 
@@ -189,8 +193,20 @@ FÓRMULAS: {json.dumps(request.formulas, ensure_ascii=False)}
         self, request: GenerateWeeklyExamRequest
     ) -> ExercisesResponse:
         subtopics = [subtema.model_dump() for subtema in request.subtemas]
+        titulo_semana = (request.titulo_semana or "").strip()
+        if not titulo_semana or titulo_semana == "Semana de Estudio":
+            subtopic_titles = [
+                subtema.titulo.strip()
+                for subtema in request.subtemas
+                if subtema.titulo.strip()
+            ]
+            titulo_semana = (
+                f"Examen semanal: {', '.join(subtopic_titles)}"
+                if subtopic_titles
+                else "Examen semanal de Matemática Discreta"
+            )
         prompt = f"""
-Genera exactamente 10 ejercicios integradores para el examen de la semana "{request.titulo_semana}".
+Genera exactamente 10 ejercicios integradores para el examen de la semana "{titulo_semana}".
 Incluye 4 básicos, 4 intermedios y 2 reto, mezclando todos los subtemas. Los opción múltiple
 requieren exactamente cuatro opciones con tres distractores inteligentes, producto de errores
 universitarios plausibles. Incluye pista y solución detallada en todos. Usa LaTeX válido y escapa
