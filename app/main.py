@@ -11,6 +11,7 @@ from app.services.gemini_service import (
     GeminiAPIError,
     GeminiRateLimitError,
     GeminiResponseValidationError,
+    GeminiUnavailableError,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,20 @@ async def gemini_rate_limit_handler(
         status_code=429,
         content={
             "error": "rate_limit",
+            "message": str(exc),
+            "retryable": True,
+        },
+    )
+
+
+@app.exception_handler(GeminiUnavailableError)
+async def gemini_unavailable_handler(
+    request: Request, exc: GeminiUnavailableError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "gemini_unavailable",
             "message": str(exc),
             "retryable": True,
         },

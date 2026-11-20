@@ -1,9 +1,12 @@
 import json
+import asyncio
 from copy import deepcopy
+from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from google import genai
 from google.genai import errors, types
+import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.config import get_settings
@@ -32,6 +35,14 @@ class GeminiAPIError(RuntimeError):
 
 class GeminiResponseValidationError(RuntimeError):
     """Indica que Gemini no devolvió datos compatibles con el esquema."""
+
+
+class GeminiUnavailableError(RuntimeError):
+    """Indica que Gemini estuvo temporalmente no disponible."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -108,6 +119,67 @@ def _is_rate_limit_error(error: Exception) -> bool:
     )
 
 
+def _get_error_status_code(error: Exception) -> int | None:
+    status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
+    try:
+        return int(status_code)
+    except (TypeError, ValueError):
+        text = str(error).lower()
+        for code in (400, 401, 429, 503):
+            if str(code) in text:
+                return code
+        return None
+
+
+def _is_transient_gemini_error(error: Exception) -> bool:
+    status_code = _get_error_status_code(error)
+    text = str(error).lower()
+    return (
+        status_code == 503
+        or "503" in text
+        or "unavailable" in text
+        or isinstance(error, (httpx.RequestError, httpx.TimeoutException, ConnectionError, TimeoutError))
+    )
+
+
+async def call_gemini_with_retry(
+    generate: Callable[[], Awaitable[T]],
+    max_attempts: int = 3,
+) -> T:
+    """Envuelve una llamada a Gemini y reintenta solo sobrecargas o fallos transitorios."""
+    for attempt in range(max_attempts):
+        try:
+            return await generate()
+        except (errors.APIError, errors.ClientError) as exc:
+            status_code = _get_error_status_code(exc)
+            if status_code in (400, 401, 429):
+                raise
+            if status_code == 503 or _is_transient_gemini_error(exc):
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(2 ** (attempt + 1))
+                    continue
+                raise GeminiUnavailableError(
+                    "Gemini estuvo temporalmente sobrecargado después de 3 intentos."
+                ) from exc
+            raise
+        except (httpx.RequestError, httpx.TimeoutException, ConnectionError, TimeoutError) as exc:
+            if attempt < max_attempts - 1:
+                await asyncio.sleep(2 ** (attempt + 1))
+                continue
+            raise GeminiUnavailableError(
+                "No fue posible conectar temporalmente con Gemini después de 3 intentos."
+            ) from exc
+        except Exception as exc:
+            if _is_transient_gemini_error(exc):
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(2 ** (attempt + 1))
+                    continue
+                raise GeminiUnavailableError(
+                    "Gemini estuvo temporalmente no disponible después de 3 intentos."
+                ) from exc
+            raise
+
+
 class GeminiService:
     def __init__(self) -> None:
         settings = get_settings()
@@ -116,15 +188,19 @@ class GeminiService:
 
     async def _generate(self, prompt: str, response_schema: type[T]) -> T:
         try:
-            response = await self.client.aio.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.25,
-                    response_mime_type="application/json",
-                    response_schema=build_gemini_schema(response_schema),
-                ),
+            response = await call_gemini_with_retry(
+                lambda: self.client.aio.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.25,
+                        response_mime_type="application/json",
+                        response_schema=build_gemini_schema(response_schema),
+                    ),
+                )
             )
+        except GeminiUnavailableError:
+            raise
         except (errors.APIError, errors.ClientError) as exc:
             status_code = int(getattr(exc, "code", 500) or 500)
             detail = getattr(exc, "message", None) or str(exc)
